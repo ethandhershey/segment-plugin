@@ -4,6 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "segment-plugin"
+license = { file = "LICENSE" }
 
 requires-python = ">=3.8"
 
@@ -41,7 +42,7 @@ tag_name = "v{new_version}"
 tag_message = "Release v{new_version}"
 allow_dirty = false
 commit = true
-message = "Bump version: {current_version} → {new_version}"
+message = "Bump version: {current_version} ➡ {new_version}"
 commit_args = ""
 
 [[tool.bumpversion.files]]

@@ -1,5 +1,8 @@
 [package]
 name = "segment-plugin"
+authors = ["Ethan Hershey"]
+license = "MIT"
+license-file = "LICENSE"
 version = "0.2.2"
 edition = "2024"
 
