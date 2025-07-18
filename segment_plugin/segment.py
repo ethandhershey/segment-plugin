@@ -4,10 +4,12 @@ from scipy import stats
 
 from tqdm import tqdm
 
-from typing import Iterable, Dict, NamedTuple, Optional, TypedDict, List
-from datetime import timedelta
+from typing import Iterable, TypedDict
+from datetime import timedelta, datetime
 from pathlib import Path
 import heapq
+import json
+import time
 
 class ContinuousValues(TypedDict, total=False):
     mean: float
@@ -20,22 +22,23 @@ def create_test_control_assignment(
     df: pl.DataFrame,
     segment_col_name: str,
     date_col_name: str,
-    continuous_rules: Dict[str, ContinuousValues],
-    categorical_rules: Dict[str, CategoricalValues],
-    fraction_control: float = 0.1,
-    percent_backoff: int = 10,
+    continuous_rules: dict[str, ContinuousValues],
+    categorical_rules: dict[str, CategoricalValues],
+    proportion_control: float = 0.1,
+    percent_backoff: float = 0.1,
+    interval_backoff: timedelta | int = timedelta(hours=2),
     interval_save: timedelta = timedelta(hours=1),
     filename_save: Path = Path('tc_save_{}.json'),
     seed_start: int = 0,
     n_iters: int = int(1e9),
     n_save: int = 100,
-) -> List:
+) -> list:
     if df.get_column(date_col_name).dtype != pl.Categorical and df.get_column(date_col_name).dtype != pl.Enum:
         raise ValueError(
             f'date_col_name column must be of type Categorical or Enum, the column is of type {df.get_column(date_col_name).dtype}'
         )
 
-    n_control: int = int(df.height * fraction_control + 1)
+    n_control: int = int(df.height * proportion_control + 1)
     n_test: int = df.height - n_control
 
     df = (
@@ -50,10 +53,40 @@ def create_test_control_assignment(
         continuous_values: ContinuousValues
         categorical_values: CategoricalValues
 
-    top_seeds: List[(float, PassedSeed)] = [(float('-inf'), PassedSeed(seed=None, continuous_values=None, categorical_values=None))] * n_save
+    top_seeds: list[(float, PassedSeed)] = [(float('-inf'), PassedSeed(seed=None, continuous_values=None, categorical_values=None))] * n_save
     heapq.heapify(top_seeds)
 
-    for i in tqdm(range(n_iters), desc='Processing seeds'):
+    last_save_time = time.time()
+    last_backoff_time = time.time()
+    
+    def save_top_seeds(current_iter: int):
+        save_path = Path(str(filename_save).format(current_iter))
+        
+        # Convert heap to sorted list for saving (best scores first)
+        sorted_seeds = sorted(top_seeds, key=lambda x: x[0], reverse=True)
+        
+        # Prepare data for JSON serialization
+        save_data = {
+            'timestamp': datetime.now().isoformat(),
+            'iteration': current_iter,
+            'total_iterations': n_iters,
+            'n_save': n_save,
+            'top_seeds': [
+                {
+                    'score': float(score),
+                    'seed': seed_data['seed'],
+                    'continuous_values': seed_data['continuous_values'],
+                    'categorical_values': seed_data['categorical_values']
+                }
+                for score, seed_data in sorted_seeds
+                if seed_data['seed'] is not None  # Skip placeholder entries
+            ]
+        }
+        
+        with open(save_path, 'w') as f:
+            json.dump(save_data, f, indent=2)
+
+    for i in tqdm(range(seed_start, n_iters), desc='Processing seeds'):
         zero_or_one: pl.Series = pl.concat([
             pl.repeat(0, int(df.height / 2 + 0.5)),
             pl.repeat(1, int(df.height / 2))
@@ -69,7 +102,7 @@ def create_test_control_assignment(
                 pl.len().over(segment_col_name).alias('_group_len')
             )
             .with_columns(
-                pl.when(pl.col('_group_index') < (fraction_control * pl.col('_group_len') - pl.col('_zero_or_one')))
+                pl.when(pl.col('_group_index') < (proportion_control * pl.col('_group_len') - pl.col('_zero_or_one')))
                 .then(pl.lit("control"))
                 .otherwise(pl.lit("test"))
                 .cast(pl.Categorical)
@@ -78,8 +111,6 @@ def create_test_control_assignment(
             .drop(cs.starts_with('_').exclude('_group'))
             .collect()
         )
-
-        # print(shuffled_df.group_by('customer_segment').agg(pl.col('_assignment').value_counts()))
 
         score = 0
         continuous_values: ContinuousValues = {}
@@ -140,7 +171,7 @@ def create_test_control_assignment(
                     .collect()
                     .pivot(values='_proportion', index=col_name, on='_group')
                     .select(
-                        (pl.col('test') - pl.col('control') > proportion_rule).max()
+                        (pl.col('test') - pl.col('control')).max()
                     )
                     .item()
                 )
@@ -160,10 +191,26 @@ def create_test_control_assignment(
             PassedSeed(
                 seed=i,
                 continuous_values=continuous_values,
-                categorical_values=categorical_rules,
+                categorical_values=categorical_values,
             )
         ))
 
+        current_time = time.time()
+
+        if current_time - last_save_time >= interval_save.total_seconds():
+            save_top_seeds(i)
+            last_save_time = current_time
+        
+        if isinstance(interval_backoff, int):
+            if (i+1) % interval_backoff == 0:
+                pass
+        else:
+            if current_time - last_backoff_time >= interval_backoff.total_seconds():
+                pass
+
+    # Final save at the end
+    save_top_seeds(n_iters)
+    
     return top_seeds
 
 def get_p_value(group_1: pl.Series, group_2: pl.Series):
@@ -174,7 +221,7 @@ def get_p_value(group_1: pl.Series, group_2: pl.Series):
 
 def create_segment_column(
     df: pl.DataFrame,
-    segment_cols: Dict[str, int],
+    segment_cols: dict[str, int],
     segment_col_name: str = 'combined_segments',
 ) -> pl.Series:
     segment_col = pl.repeat('', df.height, eager=True)

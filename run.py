@@ -83,7 +83,7 @@ continuous_cols = {
 # Define categorical columns options
 categorical_cols = {
     "gender": {
-        "proportion": 0.05  # 5% tolerance for proportions
+        "proportion": 0.05
     },
     "region": {
         "proportion": 0.03
@@ -102,10 +102,9 @@ result = sp.create_test_control_assignment(
     date_col_name="date",
     continuous_rules=continuous_cols,
     categorical_rules=categorical_cols,
-    fraction_control=0.2,  # 20% control group
-    percent_backoff=0.05,  # 5% backoff
-    interval_save=timedelta(minutes=30),  # Save every 30 minutes
-    seed_start=42,
+    proportion_control=0.2,
+    percent_backoff=5,
+    interval_save=timedelta(minutes=30),
     n_iters=1000
 )
 
