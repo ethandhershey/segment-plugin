@@ -1,4 +1,4 @@
-# Project Name
+# segment-plugin
 
 Brief description of what this project does.
 
@@ -101,6 +101,7 @@ This project uses automated versioning and publishing. Here's how to create a ne
    ```bash
    git push origin main --tags
    ```
+   The package will be updated at https://pypi.org/project/segment-plugin
 
 ## Contributing
 
