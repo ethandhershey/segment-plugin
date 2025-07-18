@@ -59,7 +59,10 @@ df = pl.DataFrame({
     "is_active": np.random.choice([True, False], n_rows, p=[0.8, 0.2])
 })
 
-df = df.with_columns(pl.col('date').map_elements(lambda x: str(x.month), return_dtype=pl.Utf8).cast(pl.Categorical))
+df = df.with_columns(
+    pl.col('date').map_elements(lambda x: str(x.month), return_dtype=pl.Utf8).cast(pl.Categorical),
+    pl.col('customer_segment').cast(pl.Categorical)
+)
 
 print(df.get_column('date').value_counts())
 

@@ -1,3 +1,7 @@
+# Custom
+.tc_saves/
+
+# Rust
 /target
 
 # Byte-compiled / optimized / DLL files

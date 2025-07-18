@@ -50,5 +50,5 @@ def guess_the_number() -> None:
     sp._internal.guess_the_number()
 
 from segment_plugin.funcs import to_snake_case
-
 from segment_plugin.segment import create_segment_column, create_test_control_assignment
+from segment_plugin.segment_pd import create_test_control_assignment_pd
