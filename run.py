@@ -9,8 +9,7 @@ df = pl.DataFrame({
 print(df.with_columns(sp.cum_sum('a').name.suffix('_cum_sum')))
 
 # sp.guess_the_number()
-print(sp.to_snake_case('hellO'))
-
+print(sp.to_snake_case('whatTTa'))
 
 df = pl.DataFrame({
     "a": [23.5, 24.1, 22.8, 25.3, 23.9],
@@ -106,8 +105,8 @@ result = sp.create_test_control_assignment(
     continuous_rules=continuous_cols,
     categorical_rules=categorical_cols,
     proportion_control=0.2,
-    percent_backoff=5,
-    interval_save=timedelta(minutes=30),
+    percent_backoff=0.05,
+    interval_save=timedelta(seconds=3),
     n_iters=1000
 )
 
