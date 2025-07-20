@@ -14,11 +14,11 @@ print(sp.to_snake_case('whatTTa'))
 df = pl.DataFrame({
     "a": [23.5, 24.1, 22.8, 25.3, 23.9],
     "b": [45.2, 48.7, 44.3, 50.1, 46.8],
-    "c": [1013.2, 1012.8, 1014.1, 1011.9, 1013.5],
+    "c": [1013.5, 1012.8, 1014.1, 1011.9, 1013.5],
     "d": [5.4, 6.2, 4.8, 7.1, 5.9]
 })
 print(
-    sp.create_segment_column(df=df, segment_cols={'b': 2, 'c': 3})
+    sp.create_segment_column(df=df, segment_cols={'b': 10000, 'c': 10})
 )
 
 import polars as pl

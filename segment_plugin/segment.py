@@ -154,7 +154,7 @@ def create_test_control_assignment(
 
     try:
         for i in tqdm(range(seed_start, n_iters), desc='Processing seeds'):
-            shuffled_df: pl.DataFrame = shuffle_into_groups(df, segment_col_name, proportion_control, seed=i)
+            shuffled_df: pl.DataFrame = shuffle_into_groups(df, segment_col_name, proportion_control, seed=i, group_col_name='_group')
 
             score = 0.0
             continuous_results: dict[str, ContinuousResult] = {}
@@ -368,12 +368,18 @@ def create_segment_column(
         ...     segment_col_name='customer_segments'
         ... )
         >>> print(segments)
-        # Returns Series with values like '0_0_0', '1_1_1', etc.
+        # Returns Series with values like '010', '111', etc.
     """
     segment_col = pl.repeat('', df.height, eager=True)
 
     for col_name, n_segments in segment_cols.items():
-        segment_col += df.get_column(col_name).qcut(n_segments, labels=[f"{i}" for i in range(n_segments)])
+        if n_segments < 2:
+            raise ValueError(f'{n_segments} is less then 2, n_segments must be at least 2')
+        try:
+            segment_col += df.get_column(col_name).qcut(n_segments, labels=[f"{i}" for i in range(n_segments)])
+        except pl.exceptions.DuplicateError:
+            raise ValueError(f'Column \"{col_name}\" could not be split into {n_segments}, try lowering the number of segments')
+    
     
     segment_col = segment_col.cast(pl.Categorical).alias(segment_col_name)
     
