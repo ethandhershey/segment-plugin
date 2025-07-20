@@ -164,7 +164,7 @@ def shuffle_into_groups_pd(
     segment_col_name: str,
     proportion_control: float,
     seed: int,
-    group_col_name: str = '_group'
+    group_col_name: str = 'group'
 ) -> pd.DataFrame:
     """
     Shuffle data into test and control groups while maintaining segment balance.

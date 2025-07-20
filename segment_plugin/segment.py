@@ -273,7 +273,7 @@ def shuffle_into_groups(
     segment_col_name: str,
     proportion_control: float,
     seed: int,
-    group_col_name: str = '_group'
+    group_col_name: str = 'group'
 ) -> pl.DataFrame:
     """
     Shuffle data into test and control groups while maintaining segment balance.
@@ -300,7 +300,7 @@ def shuffle_into_groups(
         ... })
         >>> result = shuffle_into_groups(df, 'segment', 0.5, seed=42)
         >>> print(result)
-        # Returns DataFrame with '_group' column containing 'control' and 'test'
+        # Returns DataFrame with 'group' column containing 'control' and 'test'
     """
     # 50% 0 and 50% 1, although this doesn't have to be the case.
     # You could make this account for the small groups and perfectly balance based
@@ -324,9 +324,9 @@ def shuffle_into_groups(
             .then(pl.lit("control"))
             .otherwise(pl.lit("test"))
             .cast(pl.Categorical)
-            .alias("_group")
+            .alias(group_col_name)
         )
-        .drop(cs.starts_with('_').exclude('_group'))
+        .drop(cs.starts_with('_').exclude(group_col_name))
         .collect()
     )
 
