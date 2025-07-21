@@ -30,6 +30,7 @@ class CategoricalResult(TypedDict, total=False):
 
 def create_test_control_assignment(
     df: pl.DataFrame,
+    id_col_name: str,
     segment_col_name: str,
     date_col_name: str,
     continuous_rules: dict[str, ContinuousRule],
@@ -52,6 +53,7 @@ def create_test_control_assignment(
     
     Args:
         df: Polars DataFrame containing the data to be assigned
+        id_col_name: Name of the column containing unique identifiers
         segment_col_name: Name of the column containing segment identifiers
         date_col_name: Name of the column containing date/time information
         continuous_rules: Dictionary mapping continuous column names to statistical rules.
@@ -89,6 +91,7 @@ def create_test_control_assignment(
         ... })
         >>> result = create_test_control_assignment(
         ...     df=df,
+        ...     id_col_name='id',
         ...     segment_col_name='segment',
         ...     date_col_name='date',
         ...     continuous_rules={'value': {'mean': 0.05}},
@@ -108,7 +111,7 @@ def create_test_control_assignment(
 
     df = (
         df
-        .select(list(continuous_rules.keys()) + list(categorical_rules.keys()) + [segment_col_name, date_col_name])
+        .select(list(continuous_rules.keys()) + list(categorical_rules.keys()) + [id_col_name, segment_col_name, date_col_name])
         .sort(pl.col(segment_col_name))
         .with_row_index(name='_index')
     )
@@ -157,7 +160,9 @@ def create_test_control_assignment(
 
     try:
         for i in tqdm(range(seed_start, n_iters), desc='Processing seeds'):
-            shuffled_df: pl.DataFrame = shuffle_into_groups(df, segment_col_name, proportion_control, seed=i, group_col_name='_group')
+            mapped_ids: pl.DataFrame = assign_groups_by_segments(df, id_col_name, segment_col_name, proportion_control, seed=i, group_col_name='_group')
+
+            df_with_group: pl.DataFrame = df.join(mapped_ids, on=id_col_name, how='left')
 
             score = 0.0
             continuous_results: dict[str, ContinuousResult] = {}
@@ -168,7 +173,7 @@ def create_test_control_assignment(
                 mean_rule = rules.get("mean", None)
                 if mean_rule is not None:
                     means_df = (
-                        shuffled_df
+                        df_with_group
                         .lazy()
                         .group_by(date_col_name, '_group')
                         .agg(pl.col(col_name).mean())
@@ -189,8 +194,8 @@ def create_test_control_assignment(
                 overall_rule = rules.get("overall", None)
                 if overall_rule is not None:
                     p_value = get_p_value(
-                        shuffled_df.filter(pl.col('_group') == 'control').get_column(col_name),
-                        shuffled_df.filter(pl.col('_group') == 'test').get_column(col_name)
+                        df_with_group.filter(pl.col('_group') == 'control').get_column(col_name),
+                        df_with_group.filter(pl.col('_group') == 'test').get_column(col_name)
                     )
 
                     if p_value < overall_rule:
@@ -208,7 +213,7 @@ def create_test_control_assignment(
                 proportion_rule = rules.get("proportion", None)
                 if proportion_rule is not None:
                     max_difference = (
-                        shuffled_df
+                        df_with_group
                         .lazy()
                         .group_by('_group', col_name)
                         .agg(pl.count().alias('_count'))
@@ -282,8 +287,9 @@ def get_p_value(group_1: pl.Series, group_2: pl.Series) -> float:
     _statistic, p_value = stats.ttest_ind(group_1, group_2, equal_var=False)
     return p_value
 
-def shuffle_into_groups(
+def assign_groups_by_segments(
     df: pl.DataFrame,
+    id_col_name: str,
     segment_col_name: str,
     proportion_control: float,
     seed: int,
@@ -298,6 +304,7 @@ def shuffle_into_groups(
     
     Args:
         df: Polars DataFrame containing the data to be shuffled
+        id_col_name: Name of the column containing unique identifiers
         segment_col_name: Name of the column containing segment identifiers
         proportion_control: Proportion of data to assign to control group (0.0 to 1.0)
         seed: Random seed for reproducible shuffling
@@ -309,10 +316,11 @@ def shuffle_into_groups(
     
     Example:
         >>> df = pl.DataFrame({
+        ...     'id': [1, 2, 3, 4, 5, 6],
         ...     'segment': ['A', 'A', 'B', 'B', 'C', 'C'],
         ...     'value': [1, 2, 3, 4, 5, 6]
         ... })
-        >>> result = shuffle_into_groups(df, 'segment', 0.5, seed=42)
+        >>> result = assign_groups_by_segments(df, id_col_name='id', segment_col_name='segment', proportion_control=0.5, seed=42)
         >>> print(result)
         # Returns DataFrame with 'group' column containing 'control' and 'test'
     """
@@ -326,6 +334,8 @@ def shuffle_into_groups(
 
     shuffled_df = (
         df
+        .group_by(id_col_name)
+        .agg(pl.col(segment_col_name).str.join())
         .sample(fraction=1, shuffle=True, seed=seed)
         .lazy()
         .with_columns(

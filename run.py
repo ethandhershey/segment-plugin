@@ -100,6 +100,7 @@ print(df.get_column('customer_segment').value_counts())
 # Call the function with test inputs
 result = sp.create_test_control_assignment(
     df=df,
+    id_col_name='customer_id',
     segment_col_name="customer_segment",
     date_col_name="date",
     continuous_rules=continuous_cols,
