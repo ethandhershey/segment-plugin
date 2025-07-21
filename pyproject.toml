@@ -29,7 +29,7 @@ features = ["pyo3/extension-module"]
 module-name = "segment_plugin._internal"
 
 [tool.bumpversion]
-current_version = "0.2.5"
+current_version = "0.2.6"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
 serialize = ["{major}.{minor}.{patch}"]
 search = "{current_version}"
