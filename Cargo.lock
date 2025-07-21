@@ -2464,7 +2464,7 @@ dependencies = [
 
 [[package]]
 name = "segment-plugin"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "polars",
  "polars-arrow",

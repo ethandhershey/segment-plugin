@@ -111,7 +111,7 @@ def create_test_control_assignment(
     grouped_df = (
         df
         .group_by(id_col_name, maintain_order=True)
-        .agg(pl.col(segment_col_name).str.join())
+        .agg(pl.col(segment_col_name).first())
     )
 
     print(grouped_df.get_column(segment_col_name).value_counts())
