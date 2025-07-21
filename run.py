@@ -18,7 +18,7 @@ df = pl.DataFrame({
     "d": [5.4, 6.2, 4.8, 7.1, 5.9]
 })
 print(
-    sp.create_segment_column(df=df, segment_cols={'b': 2, 'c': 2})
+    sp.create_segment_column(grouped_df=df, segment_cols={'b': 2, 'c': 2})
 )
 
 import polars as pl
@@ -54,7 +54,7 @@ df = pl.DataFrame({
     "membership_type": np.random.choice(["Basic", "Premium", "Gold"], n_rows, p=[0.6, 0.3, 0.1]),
     
     # Additional columns
-    "customer_id": range(n_rows),
+    "customer_id": list(range(n_rows - 4)) + [0, 1, 2, 3],
     "is_active": np.random.choice([True, False], n_rows, p=[0.8, 0.2])
 })
 

@@ -45,43 +45,35 @@ def create_test_control_assignment(
     n_save: int = 100,
 ) -> list:
     """
-    Create optimal test/control assignments for A/B testing with statistical constraints.
-    
-    This function performs iterative random assignment of data to test and control groups,
-    evaluating each assignment against statistical rules to find the best configurations.
-    It saves progress periodically and can be interrupted and resumed.
-    
+    Iteratively search for optimal test/control assignments for A/B testing, subject to statistical constraints.
+
+    This function randomly assigns data to test and control groups, evaluating each assignment against user-specified statistical rules. It periodically saves progress and supports interruption/resumption. The top scoring seeds (assignments) are tracked and returned.
+
     Args:
-        df: Polars DataFrame containing the data to be assigned
-        id_col_name: Name of the column containing unique identifiers
-        segment_col_name: Name of the column containing segment identifiers
-        date_col_name: Name of the column containing date/time information
-        continuous_rules: Dictionary mapping continuous column names to statistical rules.
-            Each rule can specify:
-            - 'mean': Maximum p-value threshold for mean differences between groups
-            - 'overall': Maximum p-value threshold for overall differences between groups
-        categorical_rules: Dictionary mapping categorical column names to statistical rules.
-            Each rule can specify:
-            - 'proportion': Maximum proportion difference allowed between groups
-        proportion_control: Proportion of data to assign to control group (default: 0.1)
-        percent_backoff: Percentage for backoff mechanism (default: 0.1)
-        interval_backoff: Time interval or iteration count for backoff (default: 2 hours)
-        interval_save: Time interval or iteration count for saving progress (default: 1 hour)
-        filename_save: File path pattern for saving results, uses {} for iteration number
-        seed_start: Starting random seed for iteration (default: 0)
-        n_iters: Maximum number of iterations to perform (default: 1 billion)
-        n_save: Number of top seeds to save (default: 100)
-    
+        df (pl.DataFrame): Data to be assigned.
+        id_col_name (str): Name of the column with unique identifiers.
+        segment_col_name (str): Name of the column with segment identifiers.
+        date_col_name (str): Name of the column with date/time information.
+        continuous_rules (dict[str, ContinuousRule]): Rules for continuous columns.
+        categorical_rules (dict[str, CategoricalRule]): Rules for categorical columns.
+        proportion_control (float, optional): Proportion of data to assign to control group. Defaults to 0.1.
+        percent_backoff (float, optional): Percentage for relaxing rules over time. Defaults to 0.1.
+        interval_backoff (timedelta|int, optional): Time or iteration interval for relaxing rules. Defaults to 2 hours.
+        interval_save (timedelta|int, optional): Time or iteration interval for saving progress. Defaults to 1 hour.
+        filename_save (Path, optional): File path pattern for saving results. Defaults to 'tc_saves/tc_save_{}.json'.
+        seed_start (int, optional): Starting random seed. Defaults to 0.
+        n_iters (int, optional): Maximum number of iterations. Defaults to 1e9.
+        n_save (int, optional): Number of top seeds to save. Defaults to 100.
+
     Returns:
-        List of tuples containing (score, seed_data) for the top performing assignments.
-        Each seed_data contains:
-        - seed: The random seed that produced this assignment
-        - continuous_values: Dictionary of p-values for continuous variables
-        - categorical_values: Dictionary of proportion differences for categorical variables
-    
+        list: List of (score, seed_data) tuples for the top assignments. Each seed_data contains:
+            - seed (int): The random seed used.
+            - continuous_values (dict): p-values for continuous variables.
+            - categorical_values (dict): proportion differences for categorical variables.
+
     Raises:
-        ValueError: If segment_col_name or date_col_name columns are not Categorical or Enum type
-    
+        ValueError: If segment_col_name or date_col_name columns are not Categorical or Enum type.
+
     Example:
         >>> df = pl.DataFrame({
         ...     'segment': ['A', 'B', 'C'] * 100,
@@ -115,6 +107,14 @@ def create_test_control_assignment(
         .sort(pl.col(segment_col_name))
         .with_row_index(name='_index')
     )
+
+    grouped_df = (
+        df
+        .group_by(id_col_name, maintain_order=True)
+        .agg(pl.col(segment_col_name).str.join())
+    )
+
+    print(grouped_df.get_column(segment_col_name).value_counts())
 
     class PassedSeed(TypedDict):
         seed: int
@@ -160,7 +160,14 @@ def create_test_control_assignment(
 
     try:
         for i in tqdm(range(seed_start, n_iters), desc='Processing seeds'):
-            mapped_ids: pl.DataFrame = assign_groups_by_segments(df, id_col_name, segment_col_name, proportion_control, seed=i, group_col_name='_group')
+            mapped_ids: pl.DataFrame = assign_groups_by_segments(
+                grouped_df=grouped_df,
+                id_col_name=id_col_name,
+                segment_col_name=segment_col_name,
+                proportion_control=proportion_control,
+                seed=i,
+                group_col_name='_group',
+            )
 
             df_with_group: pl.DataFrame = df.join(mapped_ids, on=id_col_name, how='left')
 
@@ -288,56 +295,68 @@ def get_p_value(group_1: pl.Series, group_2: pl.Series) -> float:
     return p_value
 
 def assign_groups_by_segments(
-    df: pl.DataFrame,
     id_col_name: str,
     segment_col_name: str,
     proportion_control: float,
     seed: int,
-    group_col_name: str = 'group'
+    group_col_name: str = 'group',
+    df: pl.DataFrame | None = None,
+    grouped_df: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """
-    Shuffle data into test and control groups while maintaining segment balance.
-    
-    This function randomly assigns rows to test and control groups while ensuring
-    that the specified proportion of data goes to the control group. The assignment
-    is done within each segment to maintain balance across different segments.
-    
+    Randomly assign rows to test and control groups, maintaining segment balance.
+
+    This function shuffles and assigns rows to test/control groups, ensuring the specified proportion for control and balancing assignments within each segment.
+
     Args:
-        df: Polars DataFrame containing the data to be shuffled
-        id_col_name: Name of the column containing unique identifiers
-        segment_col_name: Name of the column containing segment identifiers
-        proportion_control: Proportion of data to assign to control group (0.0 to 1.0)
-        seed: Random seed for reproducible shuffling
-        group_col_name: Name for the new column that will contain group assignments
-    
+        id_col_name (str): Name of the column with unique identifiers.
+        segment_col_name (str): Name of the column with segment identifiers.
+        proportion_control (float): Proportion of data to assign to control group (0.0 to 1.0).
+        seed (int): Random seed for reproducibility.
+        group_col_name (str, optional): Name for the new group assignment column. Defaults to 'group'.
+        df (pl.DataFrame, optional): Data to be assigned. Required if grouped_df is not provided.
+        grouped_df (pl.DataFrame, optional): Pre-grouped data. Required if df is not provided.
+
     Returns:
-        Polars DataFrame with an additional column containing group assignments.
-        The group column will contain 'control' and 'test' values.
-    
+        pl.DataFrame: DataFrame with an additional column for group assignments ('control' or 'test').
+
+    Raises:
+        ValueError: If neither or both of df and grouped_df are provided.
+
     Example:
         >>> df = pl.DataFrame({
         ...     'id': [1, 2, 3, 4, 5, 6],
         ...     'segment': ['A', 'A', 'B', 'B', 'C', 'C'],
         ...     'value': [1, 2, 3, 4, 5, 6]
         ... })
-        >>> result = assign_groups_by_segments(df, id_col_name='id', segment_col_name='segment', proportion_control=0.5, seed=42)
+        >>> result = assign_groups_by_segments(df=df, id_col_name='id', segment_col_name='segment', proportion_control=0.5, seed=42)
         >>> print(result)
         # Returns DataFrame with 'group' column containing 'control' and 'test'
     """
+    if grouped_df is not None:
+        pass
+    elif df is not None:
+        grouped_df = (
+            df
+            .group_by(id_col_name, maintain_order=True)
+            .agg(pl.col(segment_col_name).str.join())
+        )
+    else:
+        raise ValueError(f"One and only one of df or grouped_df must be not be None")
+
     # 50% 0 and 50% 1, although this doesn't have to be the case.
     # You could make this account for the small groups and perfectly balance based
     # on the input ratio but I think this is fine.
     zero_or_one: pl.Series = pl.concat([
-        pl.repeat(0, int(df.height / 2 + 0.5)),
-        pl.repeat(1, int(df.height / 2))
+        pl.repeat(0, int(grouped_df.height / 2 + 0.5)),
+        pl.repeat(1, int(grouped_df.height / 2))
     ])
 
     shuffled_df = (
-        df
-        .group_by(id_col_name)
-        .agg(pl.col(segment_col_name).str.join())
+        grouped_df
         .sample(fraction=1, shuffle=True, seed=seed)
         .lazy()
+        .select(pl.col(id_col_name), pl.col(segment_col_name))
         .with_columns(
             zero_or_one.alias('_zero_or_one'),
             pl.int_range(pl.len()).over(segment_col_name).alias('_group_index'),
@@ -348,7 +367,7 @@ def assign_groups_by_segments(
             .then(pl.lit("control"))
             .otherwise(pl.lit("test"))
             .cast(pl.Categorical)
-            .alias(group_col_name)
+            .alias(group_col_name),
         )
         .drop(cs.starts_with('_').exclude(group_col_name))
         .collect()
@@ -357,29 +376,32 @@ def assign_groups_by_segments(
     return shuffled_df
 
 def create_segment_column(
-    df: pl.DataFrame,
     segment_cols: dict[str, int],
+    df: pl.DataFrame | None = None,
+    df_id_col_name: str | None = None,
+    grouped_df: pl.DataFrame | None = None,
     segment_col_name: str = 'segments',
+    show: bool = True,
 ) -> pl.Series:
     """
-    Create a segment column by combining multiple categorical columns.
-    
-    This function creates a new segment column by quantizing continuous columns
-    and combining them with existing categorical columns. Each column is divided
-    into the specified number of segments, and the results are concatenated to
-    create unique segment identifiers.
-    
+    Create a segment column by combining and quantizing multiple columns.
+
+    This function creates a new segment column by quantizing continuous columns and combining them with categorical columns. Each column is divided into the specified number of segments, and the results are concatenated to create unique segment identifiers.
+
     Args:
-        df: Polars DataFrame containing the data
-        segment_cols: Dictionary mapping column names to number of segments.
-            For continuous columns, this specifies how many quantiles to create.
-            For categorical columns, this specifies how many categories to use.
-        segment_col_name: Name for the new segment column
-    
+        segment_cols (dict[str, int]): Mapping of column names to number of segments (quantiles or categories).
+        df (pl.DataFrame, optional): Data to use. Required if grouped_df is not provided.
+        df_id_col_name (str, optional): Name of the ID column in df. Required if df is provided.
+        grouped_df (pl.DataFrame, optional): Pre-grouped data. Required if df is not provided.
+        segment_col_name (str, optional): Name for the new segment column. Defaults to 'segments'.
+        show (bool, optional): Whether to print value counts for the new segment column. Defaults to True.
+
     Returns:
-        Polars Series containing the segment assignments as categorical values.
-        Each value is a string representing the combined segment identifier.
-    
+        pl.Series: Series containing the segment assignments as categorical values.
+
+    Raises:
+        ValueError: If neither or both of df and grouped_df are provided, or if n_segments < 2 for any column.
+
     Example:
         >>> df = pl.DataFrame({
         ...     'age': [25, 30, 35, 40, 45],
@@ -394,17 +416,46 @@ def create_segment_column(
         >>> print(segments)
         # Returns Series with values like '010', '111', etc.
     """
-    segment_col = pl.repeat('', df.height, eager=True)
+    if grouped_df is not None and df is None:
+        pass
+    elif df is not None and grouped_df is None:
+        if df_id_col_name is None:
+            raise ValueError(f"df_id_col_name must be set along with df")
+        grouped_df = (
+            df
+            .group_by(df_id_col_name)
+            .agg(pl.col(segment_cols.keys()).sum())
+        )
+    else:
+        raise ValueError(f"One and only one of df or grouped_df must be not be None")
+
+    segment_col = pl.repeat('', grouped_df.height, eager=True)
 
     for col_name, n_segments in segment_cols.items():
         if n_segments < 2:
             raise ValueError(f'{n_segments} is less then 2, n_segments must be at least 2')
         try:
-            segment_col += df.get_column(col_name).qcut(n_segments, labels=[f"{i}" for i in range(n_segments)])
+            segment_col += grouped_df.get_column(col_name).qcut(n_segments, labels=[f"{i}" for i in range(n_segments)])
         except pl.exceptions.DuplicateError:
             raise ValueError(f'Column \"{col_name}\" could not be split into {n_segments}, try lowering the number of segments')
     
     
     segment_col = segment_col.cast(pl.Categorical).alias(segment_col_name)
+
+    if show:
+        print(segment_col.value_counts())
+
+    if df is None:
+        return segment_col
+
+    final_column = (
+        df
+        .join(
+            grouped_df.with_columns(segment_col),
+            on=df_id_col_name,
+            how='left'
+        )
+        .get_column(segment_col_name)
+    )
     
-    return segment_col
+    return final_column
