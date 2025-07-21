@@ -1,6 +1,6 @@
 # segment-plugin
 
-Brief description of what this project does.
+This has a lot of unused code (specifically the rust code) because of lots of experimenting and learning. The core segment functions are implemented.
 
 ## Installation
 
