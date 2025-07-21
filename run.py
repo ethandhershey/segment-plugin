@@ -18,7 +18,7 @@ df = pl.DataFrame({
     "d": [5.4, 6.2, 4.8, 7.1, 5.9]
 })
 print(
-    sp.create_segment_column(df=df, segment_cols={'b': 10000, 'c': 10})
+    sp.create_segment_column(df=df, segment_cols={'b': 2, 'c': 2})
 )
 
 import polars as pl

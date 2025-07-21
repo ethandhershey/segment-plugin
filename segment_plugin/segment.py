@@ -10,6 +10,7 @@ from pathlib import Path
 import heapq
 import json
 import time
+import math
 
 # For rules (input constraints)
 class ContinuousRule(TypedDict, total=False):
@@ -119,6 +120,8 @@ def create_test_control_assignment(
 
     top_seeds: list[(float, PassedSeed)] = [(float('-inf'), PassedSeed(seed=None, continuous_values=None, categorical_values=None))] * n_save
     heapq.heapify(top_seeds)
+
+    added_seeds = 0
 
     last_save_time = time.time()
     last_backoff_time = time.time()
@@ -239,8 +242,11 @@ def create_test_control_assignment(
                 )
             )
             if entry != heapq.heappushpop(top_seeds, entry):
-                # TODO: added_seed = True
+                added_seeds += 1
                 pass
+
+            if math.log(added_seeds, 2).is_integer():
+                print(f'Total seeds: {added_seeds}')
 
             current_time = time.time()
 
@@ -254,10 +260,18 @@ def create_test_control_assignment(
                 last_save_time = current_time
             
             if is_time(interval_backoff, last_backoff_time):
-                # TODO: Add backoff, but backoff might not even be needed
-                pass
+                for col_name, rules in continuous_rules.items():
+                    for key in list(rules.keys()):
+                        if rules[key] is not None:
+                            rules[key] = rules[key] * (1 + percent_backoff)
+                for col_name, rules in categorical_rules.items():
+                    for key in list(rules.keys()):
+                        if rules[key] is not None:
+                            rules[key] = rules[key] * (1 + percent_backoff)
+                last_backoff_time = current_time
+                print(f"Backoff applied at iteration {i+1}")
     except KeyboardInterrupt:
-        print(f"\nInterrupted at iteration {i+1}.")
+        print(f"\nInterrupted at iteration {i+1}")
 
     # Final save at the end
     save_top_seeds(i+1)
