@@ -385,27 +385,32 @@ def create_segment_column(
 ) -> pl.Series:
     """
     Create a segment column by combining and quantizing multiple columns.
-
-    This function creates a new segment column by quantizing continuous columns and combining them with categorical columns. Each column is divided into the specified number of segments, and the results are concatenated to create unique segment identifiers.
-
+    
+    This function creates a new segment column by quantizing continuous columns
+    and combining them with categorical columns. Each column is divided into the
+    specified number of segments, and the results are concatenated to create
+    unique segment identifiers. All zero values are placed in the first segment (0).
+    
     Args:
-        segment_cols (dict[str, int]): Mapping of column names to number of segments (quantiles or categories).
+        segment_cols (dict[str, int]): Mapping of column names to number of segments
+            (quantiles or categories).
         df (pl.DataFrame, optional): Data to use. Required if grouped_df is not provided.
         df_id_col_name (str, optional): Name of the ID column in df. Required if df is provided.
         grouped_df (pl.DataFrame, optional): Pre-grouped data. Required if df is not provided.
         segment_col_name (str, optional): Name for the new segment column. Defaults to 'segments'.
         show (bool, optional): Whether to print value counts for the new segment column. Defaults to True.
-
+    
     Returns:
         pl.Series: Series containing the segment assignments as categorical values.
-
+    
     Raises:
-        ValueError: If neither or both of df and grouped_df are provided, or if n_segments < 2 for any column.
-
+        ValueError: If neither or both of df and grouped_df are provided,
+            or if n_segments < 2 for any column.
+    
     Example:
         >>> df = pl.DataFrame({
-        ...     'age': [25, 30, 35, 40, 45],
-        ...     'income': [50000, 60000, 70000, 80000, 90000],
+        ...     'age': [0, 0, 35, 40, 45],
+        ...     'income': [0, 60000, 70000, 80000, 90000],
         ...     'region': ['North', 'South', 'East', 'West', 'Central']
         ... })
         >>> segments = create_segment_column(
@@ -413,8 +418,7 @@ def create_segment_column(
         ...     segment_cols={'age': 3, 'income': 2, 'region': 2},
         ...     segment_col_name='customer_segments'
         ... )
-        >>> print(segments)
-        # Returns Series with values like '010', '111', etc.
+        >>> print(segments)  # Returns Series with values like '000', '111', etc.
     """
     if grouped_df is not None and df is None:
         pass
@@ -428,26 +432,81 @@ def create_segment_column(
         )
     else:
         raise ValueError(f"One and only one of df or grouped_df must be not be None")
-
-    segment_col = pl.repeat('', grouped_df.height, eager=True)
-
+    
+    # Initialize empty string series for concatenation
+    segment_col = pl.Series([''] * grouped_df.height)
+    
     for col_name, n_segments in segment_cols.items():
         if n_segments < 2:
-            raise ValueError(f'{n_segments} is less then 2, n_segments must be at least 2')
-        try:
-            segment_col += grouped_df.get_column(col_name).qcut(n_segments, labels=[f"{i}" for i in range(n_segments)])
-        except pl.exceptions.DuplicateError:
-            raise ValueError(f'Column \"{col_name}\" could not be split into {n_segments}, try lowering the number of segments')
+            raise ValueError(f'{n_segments} is less than 2, n_segments must be at least 2')
+        
+        col = grouped_df.get_column(col_name)
+        
+        # Create a mask for zero values
+        is_zero = col == 0
+        
+        # Get non-zero values
+        non_zero_mask = ~is_zero
+        non_zero_count = non_zero_mask.sum()
+        
+        if non_zero_count == 0:
+            # All values are zero, assign all to segment 0
+            segment_values = pl.Series(['0'] * col.len())
+        elif non_zero_count == col.len():
+            # No zeros, use regular qcut
+            try:
+                segment_values = col.qcut(n_segments, labels=[f"{i}" for i in range(n_segments)])
+                # Convert to string if it's categorical
+                if segment_values.dtype == pl.Categorical:
+                    segment_values = segment_values.cast(pl.Utf8)
+            except pl.exceptions.DuplicateError:
+                raise ValueError(f'Column "{col_name}" could not be split into {n_segments}, try lowering the number of segments')
+        else:
+            # Mix of zeros and non-zeros
+            # Initialize result array
+            result = [''] * col.len()
+            
+            # Set zeros to '0'
+            for i in range(col.len()):
+                if is_zero[i]:
+                    result[i] = '0'
+            
+            # For non-zero values, apply qcut with adjusted segments
+            if n_segments > 1:
+                # Get non-zero values
+                non_zero_values = col.filter(non_zero_mask)
+                
+                # Apply qcut to non-zero values with labels starting from 1
+                non_zero_segments = non_zero_values.qcut(
+                    n_segments - 1, 
+                    labels=[f"{i+1}" for i in range(n_segments - 1)]
+                )
+                
+                # Convert to string if categorical
+                if non_zero_segments.dtype == pl.Categorical:
+                    non_zero_segments = non_zero_segments.cast(pl.Utf8)
+                
+                # Fill in the non-zero segments
+                j = 0
+                for i in range(col.len()):
+                    if not is_zero[i]:
+                        result[i] = non_zero_segments[j]
+                        j += 1
+                
+                segment_values = pl.Series(result)
+        
+        # Concatenate with existing segments
+        segment_col = segment_col + segment_values
     
-    
+    # Convert to categorical
     segment_col = segment_col.cast(pl.Categorical).alias(segment_col_name)
-
+    
     if show:
         print(segment_col.value_counts())
-
+    
     if df is None:
         return segment_col
-
+    
     final_column = (
         df
         .join(
